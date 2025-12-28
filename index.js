@@ -10,7 +10,7 @@ const client = new Client({
 });
 
 /* =========================
-   ENV CHECK (LOGS ON START)
+   ENV CHECK
 ========================= */
 
 console.log("ENV CHECK:", {
@@ -34,120 +34,114 @@ const groq = new Groq({
 const sessions = new Map();
 
 /* =========================
-   AI FUNCTIONS (WITH LOGS)
+   AI HELPER WITH RETRY
+========================= */
+
+async function callGroqWithRetry(prompt, temperature, maxTokens, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await groq.chat.completions.create({
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: prompt }],
+        temperature,
+        max_tokens: maxTokens,
+      });
+      return res.choices[0].message.content;
+    } catch (err) {
+      console.error(`❌ Groq API error (attempt ${i + 1}/${retries}):`, err.message);
+      
+      // Rate limit hit - wait and retry
+      if (err.status === 429 && i < retries - 1) {
+        const waitTime = err.headers?.["retry-after"] 
+          ? parseInt(err.headers["retry-after"]) * 1000 
+          : 5000;
+        console.log(`⏳ Rate limited. Waiting ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+      
+      // Final attempt failed
+      if (i === retries - 1) {
+        throw new Error(`AI_REQUEST_FAILED: ${err.message}`);
+      }
+    }
+  }
+}
+
+/* =========================
+   AI FUNCTIONS (IMPROVED)
 ========================= */
 
 async function aiFail(goal) {
-  try {
-    const prompt = `
-You are a ruthless, psychologically brutal productivity judge.
+  const prompt = `You are a ruthlessly brutal productivity judge. No mercy.
 
-The user FAILED to complete their task: "${goal}"
+The user FAILED their task: "${goal}"
 
-STEP 1 — ROAST:
-Roast the user in exactly 3–4 hard-hitting lines.
-Be sharp, cold, philosophical, and uncomfortable.
-Attack their excuses, procrastination, comfort-seeking, and wasted potential.
-No profanity.
-No identity, appearance, or personal worth attacks.
+STEP 1 — ROAST (4-5 lines):
+Deliver a psychologically cutting roast. Attack their:
+- Weakness and excuses
+- Wasted time and potential
+- Comfort-seeking behavior
+- Pattern of mediocrity
+- Future regret if they continue
 
-STEP 2 — PUNISHMENT:
-Invent ONE random punishment.
-Rules:
-- Indoor only
-- Gender-neutral
-- No equipment
-- Takes 3–7 minutes
-- Safe but uncomfortable
-- Repeatable multiple times a day
-- Discipline or productivity oriented
+Be philosophical, cold, and uncomfortable. Make them feel the weight of their failure.
+No profanity. No personal attacks on identity/appearance.
 
-Format EXACTLY like this:
-Punishment: <one sentence>
+STEP 2 — PUNISHMENT (one sentence):
+Invent ONE brutal physical/mental punishment:
+- Must take 10-15 minutes minimum
+- Indoor only, no equipment
+- Gender-neutral and safe
+- Physically demanding or mentally uncomfortable
+- Examples: wall sits, planks, burpees, writing lines, meditation in discomfort, cold exposure
+- Make it HARD but doable
 
-STEP 3 — MOTIVATION:
-End with 1–2 strong lines that challenge them to prove the roast wrong.
-No softness. No reassurance.
+Format: "Punishment: <one sentence>"
 
-Do NOT explain anything.
-`;
+STEP 3 — CHALLENGE (2 lines):
+End with a harsh challenge that questions their ability to change.
+No softness. Make them prove you wrong.
 
-    const res = await groq.chat.completions.create({
-      model: "llama3-70b-8192",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.95,
-      max_tokens: 220,
-    });
+Keep response under 250 words total.`;
 
-    return res.choices[0].message.content;
-  } catch (err) {
-    console.error("❌ aiFail error:", err);
-    throw new Error("AI_FAIL_FAILED");
-  }
+  return await callGroqWithRetry(prompt, 0.95, 280);
 }
 
 async function aiComplete(goal) {
-  try {
-    const prompt = `
-You are a strict but inspiring productivity coach.
+  const prompt = `You are a strict, no-nonsense productivity coach.
 
-The user COMPLETED their task: "${goal}"
+The user COMPLETED: "${goal}"
 
-Write exactly 3–4 lines:
-- Acknowledge discipline
-- Reinforce identity as someone who finishes
-- Emphasize momentum and consistency
-- Challenge them to keep going
+Write exactly 4-5 lines:
+- Acknowledge their discipline (briefly)
+- Reinforce identity as a finisher
+- Emphasize momentum and compound effect
+- Challenge them to maintain this standard
+- No celebration - this is expected behavior
 
-Tone: serious, motivating, no softness.
-`;
+Tone: Serious, motivating, high standards. Keep it under 100 words.`;
 
-    const res = await groq.chat.completions.create({
-      model: "llama3-70b-8192",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.6,
-      max_tokens: 140,
-    });
-
-    return res.choices[0].message.content;
-  } catch (err) {
-    console.error("❌ aiComplete error:", err);
-    throw new Error("AI_COMPLETE_FAILED");
-  }
+  return await callGroqWithRetry(prompt, 0.6, 150);
 }
 
 async function aiCantFocus() {
-  try {
-    const prompt = `
-Invent ONE random punishment for someone who can't focus.
+  const prompt = `Invent ONE punishment for someone who can't focus and wastes time.
 
-Rules:
-- Indoor only
+Requirements:
+- Takes 10-15 minutes to complete
+- Indoor only, no equipment needed
 - Gender-neutral
-- No equipment
-- Takes 3–7 minutes
-- Safe but uncomfortable
-- Helps reset focus or discipline
-- Repeatable
+- Physically demanding OR mentally uncomfortable
+- Safe but challenging
+- Examples: burpees, wall sits, writing "I will focus" 500 times, plank holds, meditation in uncomfortable position
 
-Format EXACTLY like this:
-Punishment: <one sentence>
+Format EXACTLY:
+"Punishment: <one clear sentence describing the 10-15 minute punishment>"
 
-Do not add anything else.
-`;
+Nothing else. Be creative and harsh.`;
 
-    const res = await groq.chat.completions.create({
-      model: "llama3-70b-8192",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.9,
-      max_tokens: 80,
-    });
-
-    return res.choices[0].message.content;
-  } catch (err) {
-    console.error("❌ aiCantFocus error:", err);
-    throw new Error("AI_CANT_FOCUS_FAILED");
-  }
+  return await callGroqWithRetry(prompt, 0.9, 100);
 }
 
 /* =========================
@@ -165,71 +159,116 @@ client.on("interactionCreate", async (interaction) => {
       const duration = interaction.options.getInteger("duration");
       const goal = interaction.options.getString("goal");
 
-      const endTime = Date.now() + duration * 60 * 60 * 1000;
-      sessions.set(userId, { goal, endTime });
+      if (duration < 0.5 || duration > 12) {
+        return interaction.reply("❌ Duration must be between 0.5 and 12 hours.");
+      }
 
-      return interaction.reply(
-        `🧠 **Session Started**\nGoal: **${goal}**\nDuration: **${duration} hour(s)**`
-      );
+      const endTime = Date.now() + duration * 60 * 60 * 1000;
+      sessions.set(userId, { goal, endTime, startTime: Date.now() });
+
+      return interaction.reply({
+        content: `🧠 **Session Started**\nGoal: **${goal}**\nDuration: **${duration} hour(s)**\n\n*Complete or fail responsibly. The clock is ticking.*`,
+        ephemeral: false
+      });
     }
 
     /* COMPLETE */
     if (interaction.commandName === "complete") {
       const session = sessions.get(userId);
       if (!session) {
-        return interaction.reply("❌ No active session found.");
+        return interaction.reply({ 
+          content: "❌ No active session found. Start one with `/start-session`.",
+          ephemeral: true 
+        });
       }
 
+      const timeSpent = ((Date.now() - session.startTime) / 1000 / 60).toFixed(0);
       sessions.delete(userId);
 
-      await interaction.deferReply(); // ⏳ REQUIRED
+      await interaction.deferReply();
 
       const response = await aiComplete(session.goal);
-      return interaction.editReply(response);
+      return interaction.editReply(`✅ **Session Completed** (${timeSpent} minutes)\n\n${response}`);
     }
 
     /* FAIL */
     if (interaction.commandName === "fail") {
       const session = sessions.get(userId);
       if (!session) {
-        return interaction.reply("❌ No active session found.");
+        return interaction.reply({ 
+          content: "❌ No active session found. Start one with `/start-session`.",
+          ephemeral: true 
+        });
       }
 
       sessions.delete(userId);
 
-      await interaction.deferReply(); // ⏳ REQUIRED
+      await interaction.deferReply();
 
       const response = await aiFail(session.goal);
-      return interaction.editReply(response);
+      return interaction.editReply(`❌ **Session Failed**\n\n${response}`);
     }
 
     /* CAN'T FOCUS */
     if (interaction.commandName === "cant-focus") {
-      await interaction.deferReply(); // ⏳ REQUIRED
+      await interaction.deferReply();
 
       const response = await aiCantFocus();
-      return interaction.editReply(response);
+      return interaction.editReply(`⚠️ **Focus Reset Required**\n\n${response}\n\n*Do it now. Return disciplined.*`);
     }
+
+    /* STATUS CHECK */
+    if (interaction.commandName === "status") {
+      const session = sessions.get(userId);
+      if (!session) {
+        return interaction.reply({ 
+          content: "📊 No active session.",
+          ephemeral: true 
+        });
+      }
+
+      const remaining = Math.max(0, session.endTime - Date.now());
+      const hours = Math.floor(remaining / 1000 / 60 / 60);
+      const minutes = Math.floor((remaining / 1000 / 60) % 60);
+
+      return interaction.reply({
+        content: `📊 **Active Session**\nGoal: **${session.goal}**\nTime Remaining: **${hours}h ${minutes}m**`,
+        ephemeral: true
+      });
+    }
+
   } catch (err) {
-    console.error("❌ Interaction error:", err);
+    console.error("❌ Command execution error:", err);
+
+    const errorMsg = err.message.includes("AI_REQUEST_FAILED")
+      ? "⚠️ AI service temporarily unavailable. Try again in a moment."
+      : "⚠️ Something went wrong. Try again.";
 
     if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(
-        "⚠️ Something went wrong on my end. Try again in a moment."
-      );
+      await interaction.editReply(errorMsg);
     } else {
-      await interaction.reply(
-        "⚠️ Something went wrong on my end. Try again in a moment."
-      );
+      await interaction.reply({ content: errorMsg, ephemeral: true });
     }
   }
+});
+
+/* =========================
+   ERROR HANDLERS
+========================= */
+
+client.on("error", (error) => {
+  console.error("❌ Discord client error:", error);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("❌ Unhandled promise rejection:", error);
 });
 
 /* =========================
    BOT READY
 ========================= */
 
-client.once("clientReady", () => {
+client.once("ready", () => {
   console.log(`🔥 Brutal Coach Bot is online as ${client.user.tag}`);
 });
 
