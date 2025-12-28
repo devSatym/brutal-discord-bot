@@ -6,18 +6,25 @@ import Groq from "groq-sdk";
 ========================= */
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [GatewayIntentBits.Guilds],
 });
 
+/* =========================
+   ENV CHECK (LOGS ON START)
+========================= */
 
 console.log("ENV CHECK:", {
   hasGroqKey: !!process.env.GROQ_API_KEY,
-  hasDiscordToken: !!process.env.DISCORD_TOKEN
+  hasDiscordToken: !!process.env.DISCORD_TOKEN,
 });
 
+if (!process.env.GROQ_API_KEY || !process.env.DISCORD_TOKEN) {
+  console.error("❌ Missing required environment variables. Exiting.");
+  process.exit(1);
+}
 
 const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
+  apiKey: process.env.GROQ_API_KEY,
 });
 
 /* =========================
@@ -27,12 +34,12 @@ const groq = new Groq({
 const sessions = new Map();
 
 /* =========================
-   AI FUNCTIONS
+   AI FUNCTIONS (WITH LOGS)
 ========================= */
 
-// FAIL → ROAST + AI PUNISHMENT + MOTIVATION
 async function aiFail(goal) {
-  const prompt = `
+  try {
+    const prompt = `
 You are a ruthless, psychologically brutal productivity judge.
 
 The user FAILED to complete their task: "${goal}"
@@ -65,19 +72,23 @@ No softness. No reassurance.
 Do NOT explain anything.
 `;
 
-  const res = await groq.chat.completions.create({
-    model: "llama3-70b-8192",
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.95,
-    max_tokens: 220
-  });
+    const res = await groq.chat.completions.create({
+      model: "llama3-70b-8192",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.95,
+      max_tokens: 220,
+    });
 
-  return res.choices[0].message.content;
+    return res.choices[0].message.content;
+  } catch (err) {
+    console.error("❌ aiFail error:", err);
+    throw new Error("AI_FAIL_FAILED");
+  }
 }
 
-// COMPLETE → MOTIVATION ONLY
 async function aiComplete(goal) {
-  const prompt = `
+  try {
+    const prompt = `
 You are a strict but inspiring productivity coach.
 
 The user COMPLETED their task: "${goal}"
@@ -91,19 +102,23 @@ Write exactly 3–4 lines:
 Tone: serious, motivating, no softness.
 `;
 
-  const res = await groq.chat.completions.create({
-    model: "llama3-70b-8192",
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.6,
-    max_tokens: 140
-  });
+    const res = await groq.chat.completions.create({
+      model: "llama3-70b-8192",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.6,
+      max_tokens: 140,
+    });
 
-  return res.choices[0].message.content;
+    return res.choices[0].message.content;
+  } catch (err) {
+    console.error("❌ aiComplete error:", err);
+    throw new Error("AI_COMPLETE_FAILED");
+  }
 }
 
-// CAN'T FOCUS → AI-GENERATED PUNISHMENT ONLY
 async function aiCantFocus() {
-  const prompt = `
+  try {
+    const prompt = `
 Invent ONE random punishment for someone who can't focus.
 
 Rules:
@@ -121,14 +136,18 @@ Punishment: <one sentence>
 Do not add anything else.
 `;
 
-  const res = await groq.chat.completions.create({
-    model: "llama3-70b-8192",
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.9,
-    max_tokens: 80
-  });
+    const res = await groq.chat.completions.create({
+      model: "llama3-70b-8192",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.9,
+      max_tokens: 80,
+    });
 
-  return res.choices[0].message.content;
+    return res.choices[0].message.content;
+  } catch (err) {
+    console.error("❌ aiCantFocus error:", err);
+    throw new Error("AI_CANT_FOCUS_FAILED");
+  }
 }
 
 /* =========================
@@ -140,50 +159,69 @@ client.on("interactionCreate", async (interaction) => {
 
   const userId = interaction.user.id;
 
-  /* START SESSION */
-  if (interaction.commandName === "start-session") {
-    const duration = interaction.options.getInteger("duration");
-    const goal = interaction.options.getString("goal");
+  try {
+    /* START SESSION */
+    if (interaction.commandName === "start-session") {
+      const duration = interaction.options.getInteger("duration");
+      const goal = interaction.options.getString("goal");
 
-    const endTime = Date.now() + duration * 60 * 60 * 1000;
+      const endTime = Date.now() + duration * 60 * 60 * 1000;
+      sessions.set(userId, { goal, endTime });
 
-    sessions.set(userId, { goal, endTime });
-
-    return interaction.reply(
-      `🧠 **Session Started**\nGoal: **${goal}**\nDuration: **${duration} hour(s)**`
-    );
-  }
-
-  /* COMPLETE */
-  if (interaction.commandName === "complete") {
-    const session = sessions.get(userId);
-    if (!session) {
-      return interaction.reply("❌ No active session found.");
+      return interaction.reply(
+        `🧠 **Session Started**\nGoal: **${goal}**\nDuration: **${duration} hour(s)**`
+      );
     }
 
-    sessions.delete(userId);
+    /* COMPLETE */
+    if (interaction.commandName === "complete") {
+      const session = sessions.get(userId);
+      if (!session) {
+        return interaction.reply("❌ No active session found.");
+      }
 
-    const response = await aiComplete(session.goal);
-    return interaction.reply(response);
-  }
+      sessions.delete(userId);
 
-  /* FAIL */
-  if (interaction.commandName === "fail") {
-    const session = sessions.get(userId);
-    if (!session) {
-      return interaction.reply("❌ No active session found.");
+      await interaction.deferReply(); // ⏳ REQUIRED
+
+      const response = await aiComplete(session.goal);
+      return interaction.editReply(response);
     }
 
-    sessions.delete(userId);
+    /* FAIL */
+    if (interaction.commandName === "fail") {
+      const session = sessions.get(userId);
+      if (!session) {
+        return interaction.reply("❌ No active session found.");
+      }
 
-    const response = await aiFail(session.goal);
-    return interaction.reply(response);
-  }
+      sessions.delete(userId);
 
-  /* CAN'T FOCUS */
-  if (interaction.commandName === "can't-focus") {
-    const response = await aiCantFocus();
-    return interaction.reply(response);
+      await interaction.deferReply(); // ⏳ REQUIRED
+
+      const response = await aiFail(session.goal);
+      return interaction.editReply(response);
+    }
+
+    /* CAN'T FOCUS */
+    if (interaction.commandName === "cant-focus") {
+      await interaction.deferReply(); // ⏳ REQUIRED
+
+      const response = await aiCantFocus();
+      return interaction.editReply(response);
+    }
+  } catch (err) {
+    console.error("❌ Interaction error:", err);
+
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(
+        "⚠️ Something went wrong on my end. Try again in a moment."
+      );
+    } else {
+      await interaction.reply(
+        "⚠️ Something went wrong on my end. Try again in a moment."
+      );
+    }
   }
 });
 
@@ -191,7 +229,7 @@ client.on("interactionCreate", async (interaction) => {
    BOT READY
 ========================= */
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`🔥 Brutal Coach Bot is online as ${client.user.tag}`);
 });
 
