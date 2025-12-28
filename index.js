@@ -9,6 +9,13 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
+
+console.log("ENV CHECK:", {
+  hasGroqKey: !!process.env.GROQ_API_KEY,
+  hasDiscordToken: !!process.env.DISCORD_TOKEN
+});
+
+
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
